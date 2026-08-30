@@ -44,11 +44,18 @@ const isTeamAdminOf = (teams: Team[] | null, userID: string, teamId: string): bo
  * POST /model/new takes a proxy admin unconditionally, or a team admin whose payload names a
  * team; an unscoped create from anyone else is a 403. Returning the requirement rather than a
  * pair of booleans keeps "may not create" and "may create unscoped" from being confused.
+ *
+ * A view-only session is short-circuited to forbidden: the route layer 403s every /model/new
+ * from proxy_admin_viewer before the team-admin auth check ever runs, so team membership must
+ * not re-offer a create form the API always rejects.
  */
 export const modelCreationScope = (
   actor: ModelActor,
   { teams, disabledForInternalUsers }: ModelCreationLimits,
 ): ModelWriteScope => {
+  if (actor.isViewOnly) {
+    return "forbidden";
+  }
   if (isWritableProxyAdmin(actor)) {
     return "unscoped-ok";
   }
@@ -70,13 +77,19 @@ export interface ModelRowOrigin {
   isDbModel: boolean;
 }
 
-/** May this actor edit or delete this specific deployment? */
+/**
+ * May this actor edit or delete this specific deployment?
+ *
+ * A view-only session is short-circuited to false: the route layer 403s every /model/update
+ * and /model/delete from proxy_admin_viewer before the team-admin auth check ever runs, so
+ * team membership must not re-offer edit/delete forms the API always rejects.
+ */
 export const canModifyModel = (
   actor: ModelActor,
   teams: Team[] | null,
   { teamId, isDbModel }: ModelRowOrigin,
 ): boolean => {
-  if (!isDbModel) {
+  if (!isDbModel || actor.isViewOnly) {
     return false;
   }
   if (isWritableProxyAdmin(actor)) {
